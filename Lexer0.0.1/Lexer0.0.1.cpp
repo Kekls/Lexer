@@ -3,10 +3,10 @@
 #include <vector>
 #include <cctype>
 #include <unordered_map>
+#include <unordered_set>
 
 enum class STATE {
-    NORMAL,
-    EXPRESSION,
+    DEFAULT,
     STRING
 };
 
@@ -20,15 +20,16 @@ enum class TOKEN_TYPE {
     MULT,
     DIV,
     MOD,
-    IDENTIFIER
+    IDENTIFIER,
+    COMMA,
+    EQUAL
 };
 
 std::ostream& operator<<(std::ostream& os, STATE state) {
     switch (state) {
-        case STATE::NORMAL:return os << "NORMAL\n";
-        case STATE::EXPRESSION: return os << "EXPRESSION\n";
-        case STATE::STRING: return os << "STRING\n";
-        default: return os << "FATAL ERROR STATE\n";
+    case STATE::DEFAULT: return os << "DEFAULT\n";
+    case STATE::STRING: return os << "STRING\n";
+    default: return os << "FATAL ERROR STATE\n";
     }
 }
 
@@ -40,11 +41,9 @@ struct TOKEN {
 class LEXER {
 private:
     std::string s;
-    std::vector<std::string> storage;
-    std::vector<std::string> str;
-    std::vector<TOKEN> tokens;
+    std::string t;
     std::vector<std::string> lexems;
-    STATE state = STATE::NORMAL;
+    STATE state = STATE::DEFAULT;
 
     std::unordered_map<std::string, TOKEN_TYPE> KEYWORDS = {
         {"+", TOKEN_TYPE::PLUS},
@@ -53,8 +52,12 @@ private:
         {"/", TOKEN_TYPE::DIV},
         {"(", TOKEN_TYPE::LPAREN},
         {")", TOKEN_TYPE::RPAREN},
-        {"%", TOKEN_TYPE::MOD}
+        {"%", TOKEN_TYPE::MOD},
+        {",", TOKEN_TYPE::COMMA},
+        {"=", TOKEN_TYPE::EQUAL}
     };
+
+    std::unordered_set<std::string> stringCut = { "+", "-", "*", "/", "(", ")", "%", ",", ".", "=" };
 
 
 public:
@@ -72,21 +75,15 @@ public:
 
     void start() {
         textDivision();
-        tokenization();
-        lexemification();
     }
 
     void stateChange(STATE state) {
         switch (state) {
-        case STATE::NORMAL: 
-            std::cout << "NORMAL\n";
-            this->state = STATE::NORMAL;
+        case STATE::DEFAULT:
+            std::cout << "DEFAULT\n";
+            this->state = STATE::DEFAULT;
             break;
-        case STATE::EXPRESSION: 
-            std::cout << "EXPRESSION\n";
-            this->state = STATE::EXPRESSION;
-            break;
-        case STATE::STRING: 
+        case STATE::STRING:
             std::cout << "STRING\n";
             this->state = STATE::STRING;
             break;
@@ -98,106 +95,90 @@ public:
         char stringSep;
 
         for (int i = 0; i < s.length(); i++) {
-            if (state == STATE::NORMAL) {
-                if (s[i] == '\'' || s[i] == '\"') {
-                    str.push_back(std::string(1, s[i]));
-                    stateChange(STATE::STRING);
-                    stringSep = s[i];
-                }
-                else if (isspace(s[i])) {
+            if (state == STATE::STRING) {
 
-                    if (str.empty()) continue;
-
-                    storage.push_back(stringify(str));
-                    str.clear();
-                }
-                else {
-                    stateChange(STATE::EXPRESSION);
-                    str.push_back(std::string(1, s[i]));
-                }
-            }
-            else if (state == STATE::EXPRESSION) {
-                if (isspace(s[i])) {
-                    storage.push_back(stringify(str));
-                    str.clear();
-                    stateChange(STATE::NORMAL);
-                }
-                else {
-                    str.push_back(std::string(1, s[i]));
-                }
-            }
-            else {
                 if (s[i] == stringSep) {
-                    stateChange(STATE::NORMAL);
-                    str.push_back(std::string(1, s[i]));
-                    storage.push_back(stringify(str));
-                    str.clear();
+                    stateChange(STATE::DEFAULT);
+                    t += std::string(1, s[i]);
+                    tokenization(t);
+                    t.clear();
                     stringSep = '\0';
                 }
                 else {
-                    str.push_back(std::string(1, s[i]));
+                    t += std::string(1, s[i]);
                 }
+            }
+            else if (state == STATE::DEFAULT) {
+                if (stringCut.contains(std::string(1, s[i]))) {
+                    if (!t.empty()) tokenization(t);
+                    t.clear();
+                    t += std::string(1, s[i]);
+                    tokenization(t);
+                    t.clear();
+                }
+                else {
+                    if (s[i] == '\'' || s[i] == '\"') {
+                        t += std::string(1, s[i]);
+                        stateChange(STATE::STRING);
+                        stringSep = s[i];
+                    }
+                    else if (isspace(s[i])) {
+
+                        if (t.empty()) continue;
+
+                        tokenization(t);
+                        t.clear();
+                    }
+                    else {
+                        t += std::string(1, s[i]);
+                    }
+                }
+            }
+            else {
+                std::cout << "FATAL ERROR textDivision\n";
             }
 
             if (i + 1 == s.length()) {
-                stateChange(STATE::NORMAL);
-                if(!str.empty()) storage.push_back(stringify(str));
-                str.clear();
+                stateChange(STATE::DEFAULT);
+                if (!t.empty()) tokenization(t);
+                t.clear();
                 stringSep = '\0';
             }
         }
     }
 
-    std::string stringify(std::vector<std::string> str) {
-        if (str.empty()) std::cout << "FATAL ERROR stringify\n";
+    void tokenization(std::string t) {
+        TOKEN token;
 
-        std::string returnString = "";
-        for (const auto& s : str) {
-            returnString += s;
+        if (KEYWORDS.count(t) > 0) {
+            token.type = KEYWORDS[t];
+        }
+        else if (isdigit(t[0])) {
+            token.type = TOKEN_TYPE::NUMBER;
+            token.value = t;
+        }
+        else if (t[0] == '\'' || t[0] == '\"') {
+            token.type = TOKEN_TYPE::STRING;
+            token.value = t;
+        }
+        else {
+            token.type = TOKEN_TYPE::IDENTIFIER;
+            token.value = t;
         }
 
-        return returnString;
+        lexemification(token);
     }
 
-    std::vector<std::string> getStorage() {
-        return storage;
-    }
+    void lexemification(TOKEN token) {
+        std::string s;
 
-    void tokenization() {
-        for (const auto& s : storage) {
-            TOKEN token;
-
-            if (KEYWORDS.count(s) > 0) {
-                token.type = KEYWORDS[s];
-            }
-            else if (isdigit(s[0])) {
-                token.type = TOKEN_TYPE::NUMBER;
-                token.value = s;
-            }
-            else if (s[0] == '\'' || s[0] == '\"') {
-                token.type = TOKEN_TYPE::STRING;
-                token.value = s;
-            }
-            else {
-                token.type = TOKEN_TYPE::IDENTIFIER;
-                token.value = s;
-            }
-
-            tokens.push_back(token);
+        s = tokenToString(token.type);
+        if (!token.value.empty()) {
+            s += "(" + token.value + ")";
         }
-    }
 
-    void lexemification() {
-        for (const auto& t : tokens) {
-            std::string s;
+        lexems.push_back(s);
 
-            s = tokenToString(t.type);
-            if (!t.value.empty()) {
-                s += "(" + t.value + ")";
-            }
-
-            lexems.push_back(s);
-        }
     }
 
     std::string tokenToString(TOKEN_TYPE t) {
@@ -212,6 +193,8 @@ public:
         case TOKEN_TYPE::DIV: return "DIV";
         case TOKEN_TYPE::MOD: return "MOD";
         case TOKEN_TYPE::IDENTIFIER: return "IDENTIFIER";
+        case TOKEN_TYPE::COMMA: return "COMMA";
+        case TOKEN_TYPE::EQUAL: return "EQUAL";
         default: return "UNKNOWN";
         }
     }
@@ -228,11 +211,6 @@ int main()
 
     LEXER lexer(s);
     lexer.start();
-    std::vector<std::string> storage = lexer.getStorage();
-    for (const auto& a : storage) {
-        std::cout << a;
-        std::cout << std::endl;
-    }
 
     std::vector<std::string> lexems = lexer.getLexems();
     for (const auto& l : lexems) {
@@ -242,5 +220,9 @@ int main()
 
 }
 /*
-    "ala ma kota o imieniu ' jarek ' ma on " 5 + 3 * ( 2 + 1 - 2 ) "lat"   
+    "ala ma kota o imieniu ' jarek ' ma on " 5 + 3 * ( 2 + 1 - 2 ) "lat"
+
+    std::string ala += "ala ma kotka";
+
+    // /*-473=3===-(0 "dziala jej+ su'per'"'napewno?' + "tak'!'-0(" )(
 */
