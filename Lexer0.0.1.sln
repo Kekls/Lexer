@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.7.34031.279
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Lexer0.0.1", "Lexer0.0.1\Lexer0.0.1.vcxproj", "{A8FCA38B-22FE-4237-A239-268262ECAFDE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Debug|x64.ActiveCfg = Debug|x64
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Debug|x64.Build.0 = Debug|x64
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Debug|x86.ActiveCfg = Debug|Win32
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Debug|x86.Build.0 = Debug|Win32
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Release|x64.ActiveCfg = Release|x64
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Release|x64.Build.0 = Release|x64
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Release|x86.ActiveCfg = Release|Win32
+		{A8FCA38B-22FE-4237-A239-268262ECAFDE}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A1D29C97-64C2-4714-AE6E-B32E9360A864}
+	EndGlobalSection
+EndGlobal
