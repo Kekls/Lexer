@@ -3,6 +3,7 @@
 #include <vector>
 #include <cctype>
 #include <unordered_map>
+#include <fstream>
 
 enum class STATE {
     DEFAULT,
@@ -58,7 +59,8 @@ enum class TOKEN_TYPE {
     VAR,
     BITWISE_AND,
     BITWISE_OR,
-    NEW_LINE
+    NEW_LINE,
+    END_OF_FILE
 };
 
 std::ostream& operator<<(std::ostream& os, STATE state) {
@@ -73,14 +75,19 @@ std::ostream& operator<<(std::ostream& os, STATE state) {
 
 struct TOKEN {
     TOKEN_TYPE type;
+    int line;
+    int column;
     std::string value;
 };
 
 class LEXER {
 private:
-    std::string s;
     std::vector<std::string> lexems;
     STATE state = STATE::DEFAULT;
+    std::ifstream file;
+    int currentLine;
+    int currentColumn;
+    bool debug;
 
     std::unordered_map<std::string, TOKEN_TYPE> KEYWORDS = {
         { "do", TOKEN_TYPE::DO},
@@ -92,16 +99,17 @@ private:
     };
 
 public:
-    LEXER(std::string s) {
-        this->s = s;
-    }
+    LEXER(std::string path, bool debug) {
+        file.open(path, std::ios::binary);
 
-    std::string getString() {
-        return s;
-    }
+        if (!file) {
+            std::cerr << "File '" << path << "' could not be opened!\n";
+            exit;
+        }
 
-    void setString(std::string s) {
-        this->s = s;
+        if (debug == true) {
+            this->debug = true;
+        }
     }
 
     void start() {
@@ -109,42 +117,57 @@ public:
         std::string buffer = {};
 
         char peek = {};
+        char current = {};
 
-        for (int i = 0; i < s.length(); i++) {
-            if (i + 1 < s.length()) {
-                peek = s[i + 1];
-            }
+        currentLine = 1;
+        currentColumn = 1;
+
+        while (file.get(current)) {
+            int next = file.peek();
+
+            if (next != EOF) { peek =  static_cast<char>(next); }
+            else { peek = {}; }
 
             if (state == STATE::COMMENT_BLOCK || state == STATE::COMMENT_LINE) {
 
-                commentState(buffer, peek, i, stringSep);
+                commentState(buffer, current, peek, stringSep);
             }
             else if (state == STATE::STRING) {
 
-                stringState(buffer, i, stringSep);
+                stringState(buffer, current, peek, stringSep);
             }
             else if (state == STATE::DEFAULT) {
 
-                defaultState(buffer, peek, i, stringSep);
+                defaultState(buffer, current, peek, stringSep);
             }
             else {
                 std::cout << "FATAL ERROR textDivision\n";
             }
 
-            if (i + 1 == s.length()) {
+            currentColumn++;
+
+            if (next == EOF) {
                 stateChange(STATE::DEFAULT);
                 tokenize(buffer);
+
                 stringSep = {};
+                TOKEN token = {};
+
+                token.type = TOKEN_TYPE::END_OF_FILE;
+
+                lexemification(token);
             }
         }
     }
 
-    void commentState(std::string& buffer, char peek, int& i, char& stringSep) {
+    void commentState(std::string& buffer, char current, char peek, char& stringSep) {
 
-        if (state == STATE::COMMENT_LINE && s[i] == '\\' && peek == 'n') {
+        if (state == STATE::COMMENT_LINE && current == '\n') {
             TOKEN token = {};
             token.type = TOKEN_TYPE::COMMENT_LINE;
             token.value = buffer;
+            token.line = currentLine;
+            token.column = currentColumn - buffer.length();
             lexemification(token);
 
             buffer.clear();
@@ -152,35 +175,47 @@ public:
             token = {};
             stateChange(STATE::DEFAULT);
             token.type = TOKEN_TYPE::NEW_LINE;
+            currentColumn = 0;
+            currentLine++;
             lexemification(token);
 
-            i++;
         }
-        else if (state == STATE::COMMENT_BLOCK && s[i] == '*' && peek == '/') {
+        else if (state == STATE::COMMENT_BLOCK && current == '*' && peek == '/') {
             TOKEN token = {};
 
-            buffer += std::string(1, s[i]) + std::string(1, peek);
-            token.type = TOKEN_TYPE::COMMENT_LINE;
+            buffer += std::string(1, current) + std::string(1, peek);
+            token.type = TOKEN_TYPE::COMMENT_BLOCK;
             token.value = buffer;
             lexemification(token);
 
             stateChange(STATE::DEFAULT);
             buffer.clear();
-            i++;
+            file.get();
         }
         else {
-            buffer += std::string(1, s[i]);
+            if (current == '\r') {
+                return;
+            }
+
+            if (state == STATE::COMMENT_BLOCK && current == '\n') {
+                currentColumn = 0;
+                currentLine++;
+            }
+            buffer += std::string(1, current);
         }
     }
 
-    void stringState(std::string& buffer, int& i, char& stringSep) {
+    void stringState(std::string& buffer, char current, char peek, char& stringSep) {
 
-        if (s[i] == stringSep) {
+        if (current == stringSep) {
             TOKEN token = {};
 
-            buffer += std::string(1, s[i]);
+            buffer += std::string(1, current);
             token.type = TOKEN_TYPE::STRING;
             token.value = buffer;
+            token.line = currentLine;
+            token.column = currentColumn - buffer.length();
+            
 
             buffer.clear();
             stringSep = {};
@@ -189,109 +224,135 @@ public:
             lexemification(token);
         }
         else {
-            buffer += std::string(1, s[i]);
+            buffer += std::string(1, current); 
         }
     }
 
-    void defaultState(std::string& buffer, char peek, int& i, char& stringSep) {
+    void defaultState(std::string& buffer, char current, char peek, char& stringSep) {
 
-        TOKEN token = {};
-
-        if (isspace(s[i])) {
+        if (current == '\n') {
+            tokenize(buffer);
+            lexemification({ TOKEN_TYPE::NEW_LINE, currentLine, currentColumn });
+            currentColumn = 0;
+            currentLine++;
+            return;
+        }
+        if (current == '\r') {
+            if (peek == '\n') { file.get(); }
+            tokenize(buffer);
+            lexemification({ TOKEN_TYPE::NEW_LINE, currentLine, currentColumn });
+            currentColumn = 0;
+            currentLine++;
+            return;
+        }
+        if (isspace(current)) {
             tokenize(buffer);
             return;
         }
 
-
-        switch (s[i]) {
+        switch (current) {
 
         case '/':
-            if (peek == '*') { stateChange(STATE::COMMENT_BLOCK); i++; buffer = std::string(1, s[i - 1]) + std::string(1, s[i]); }
-            else if (peek == '/') { stateChange(STATE::COMMENT_LINE); i++; buffer = std::string(1, s[i - 1]) + std::string(1, s[i]); }
-            else if (peek == '=') { token.type = TOKEN_TYPE::DIV_ASSIGN; }
-            else { token.type = TOKEN_TYPE::DIV; }
+            tokenize(buffer);
+            if (peek == '*') { stateChange(STATE::COMMENT_BLOCK); buffer = std::string(1, current) + std::string(1, peek); file.get(); currentColumn++; }
+            else if (peek == '/') { stateChange(STATE::COMMENT_LINE); buffer = std::string(1, current) + std::string(1, peek); file.get(); currentColumn++; }
+            else if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::DIV_ASSIGN, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::DIV, currentLine, currentColumn }); }
             break;
+
         case '\"':
         case '\'':
-            buffer += std::string(1, s[i]);
-            stateChange(STATE::STRING);
-            stringSep = s[i];
-            break;
-        case '+':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::PLUS_ASSIGN; }
-            else if (peek == '+') { i++; token.type = TOKEN_TYPE::INC; }
-            else { token.type = TOKEN_TYPE::PLUS; }
-            break;
-        case '-':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::MINUS_ASSIGN; }
-            else if (peek == '-') { i++; token.type = TOKEN_TYPE::DEC; }
-            else { token.type = TOKEN_TYPE::MINUS; }
-            break;
-        case '*':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::MULT_ASSIGN; }
-            else { token.type = TOKEN_TYPE::MULT; }
-            break;
-        case '%':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::MOD_ASSIGN; }
-            else { token.type = TOKEN_TYPE::MOD; }
-            break;
-        case '=':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::EQUAL; }
-            else { token.type = TOKEN_TYPE::ASSIGN; }
-            break;
-        case '<':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::LT_EQUAL; }
-            else { token.type = TOKEN_TYPE::LT; }
-            break;
-        case '>':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::GT_EQUAL; }
-            else { token.type = TOKEN_TYPE::GT; }
-            break;
-        case '!':
-            if (peek == '=') { i++; token.type = TOKEN_TYPE::NOT_EQUAL; }
-            else { token.type = TOKEN_TYPE::NOT; }
-            break;
-        case '&':
-            if (peek == '&') { i++; token.type = TOKEN_TYPE::AND; }
-            else { token.type = TOKEN_TYPE::BITWISE_AND; }
-            break;
-        case '|':
-            if (peek == '&') { i++; token.type = TOKEN_TYPE::OR; }
-            else { token.type = TOKEN_TYPE::BITWISE_OR; }
-            break;
-        case '(':
-            token.type = TOKEN_TYPE::LPAREN; break;
-        case ')':
-            token.type = TOKEN_TYPE::RPAREN; break;
-        case '[':
-            token.type = TOKEN_TYPE::LBRACK; break;
-        case ']':
-            token.type = TOKEN_TYPE::RBRACK; break;
-        case '{':
-            token.type = TOKEN_TYPE::LBRACE; break;
-        case '}':
-            token.type = TOKEN_TYPE::RBRACE; break;
-        case '.':
-            token.type = TOKEN_TYPE::DOT; break;
-        case ',':
-            token.type = TOKEN_TYPE::COMMA; break;
-        case ':':
-            token.type = TOKEN_TYPE::COLON; break;
-        case ';':
-            token.type = TOKEN_TYPE::SEMICOLON; break;
-        case '\\':
-            if (peek == 'n') { i++; token.type = TOKEN_TYPE::NEW_LINE; }
-            break;
-        default:
-            buffer += std::string(1, s[i]);
-        }
-
-
-        if (token.type != TOKEN_TYPE::NONE) {
             tokenize(buffer);
+            buffer += std::string(1, current);
+            stateChange(STATE::STRING);
+            stringSep = current;
+            break;
 
-            lexemification(token);
-            return;
+        case '+':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::PLUS_ASSIGN, currentLine, currentColumn - 1 }); }
+            else if (peek == '+') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::INC, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::PLUS, currentLine, currentColumn }); }
+            break;
+
+        case '-':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::MINUS_ASSIGN, currentLine, currentColumn - 1 }); }
+            else if (peek == '-') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::DEC, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::MINUS, currentLine, currentColumn }); }
+            break;
+
+        case '*':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::MULT_ASSIGN, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::MULT, currentLine, currentColumn }); }
+            break;
+
+        case '%':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::MOD_ASSIGN, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::MOD, currentLine, currentColumn }); }
+            break;
+
+        case '=':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::EQUAL, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::ASSIGN, currentLine, currentColumn }); }
+            break;
+
+        case '<':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::LT_EQUAL, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::LT, currentLine, currentColumn }); }
+            break;
+
+        case '>':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::GT_EQUAL, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::GT, currentLine, currentColumn }); }
+            break;
+
+        case '!':
+            tokenize(buffer);
+            if (peek == '=') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::NOT_EQUAL, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::NOT, currentLine, currentColumn }); }
+            break;
+
+        case '&':
+            tokenize(buffer);
+            if (peek == '&') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::AND, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::BITWISE_AND, currentLine, currentColumn }); }
+            break;
+
+        case '|':
+            tokenize(buffer);
+            if (peek == '|') { file.get(); currentColumn++; lexemification({ TOKEN_TYPE::OR, currentLine, currentColumn - 1 }); }
+            else { lexemification({ TOKEN_TYPE::BITWISE_OR, currentLine, currentColumn }); }
+            break;
+
+        case '(': tokenize(buffer); lexemification({ TOKEN_TYPE::LPAREN, currentLine, currentColumn }); break;
+        case ')': tokenize(buffer); lexemification({ TOKEN_TYPE::RPAREN, currentLine, currentColumn }); break;
+        case '[': tokenize(buffer); lexemification({ TOKEN_TYPE::LBRACK, currentLine, currentColumn }); break;
+        case ']': tokenize(buffer); lexemification({ TOKEN_TYPE::RBRACK, currentLine, currentColumn }); break;
+        case '{': tokenize(buffer); lexemification({ TOKEN_TYPE::LBRACE, currentLine, currentColumn }); break;
+        case '}': tokenize(buffer); lexemification({ TOKEN_TYPE::RBRACE, currentLine, currentColumn }); break;
+        case '.': tokenize(buffer); lexemification({ TOKEN_TYPE::DOT, currentLine, currentColumn }); break;
+        case ',': tokenize(buffer); lexemification({ TOKEN_TYPE::COMMA, currentLine, currentColumn }); break;
+        case ':': tokenize(buffer); lexemification({ TOKEN_TYPE::COLON, currentLine, currentColumn }); break;
+        case ';': tokenize(buffer); lexemification({ TOKEN_TYPE::SEMICOLON, currentLine, currentColumn }); break;
+
+        case '\\':
+            if (peek == 'n') {
+                tokenize(buffer);
+                file.get();
+                currentColumn++;
+                lexemification({ TOKEN_TYPE::NEW_LINE, currentLine, currentColumn });
+            }
+            break;
+
+        default:
+            buffer += std::string(1, current);
+            break;
         }
     }
 
@@ -318,9 +379,14 @@ public:
     }
 
     void tokenize(std::string& buffer) {
+        if (buffer.empty()) return;
+
         TOKEN token = {};
 
-        if (buffer.empty()) return;
+        token.line = currentLine;
+        token.column = currentColumn - static_cast<int>(buffer.length());
+        token.value = buffer;
+
 
         if (KEYWORDS.count(buffer) > 0) {
             token.type = KEYWORDS[buffer];
@@ -347,6 +413,12 @@ public:
         }
 
         lexems.push_back(s);
+
+        if (debug) {
+            std::cout << s << std::endl;
+            std::cout << "LINE: " << token.line << std::endl;
+            std::cout << "COLUMN: " << token.column << std::endl;
+        }
 
     }
 
@@ -399,6 +471,7 @@ public:
         case TOKEN_TYPE::BITWISE_AND: return "BITWISE_AND";
         case TOKEN_TYPE::BITWISE_OR: return "BITWISE_OR";
         case TOKEN_TYPE::NEW_LINE: return "NEW_LINE";
+        case TOKEN_TYPE::END_OF_FILE: return "END_OF_FILE";
         default: return "UNKNOWN";
         }
     }
@@ -410,13 +483,18 @@ public:
 
 int main()
 {
-    std::string s;
-    std::getline(std::cin, s);
+    std::string path;
+    //std::getline(std::cin, s);
 
-    LEXER lexer(s);
+    path = "readFile.kx";
+
+    LEXER lexer(path, true);
     lexer.start();
 
     std::vector<std::string> lexems = lexer.getLexems();
+
+    std::cout << "___________________________ LEXEMS DUMP ___________________________\n";
+     
     for (const auto& l : lexems) {
         std::cout << l;
         std::cout << std::endl;
@@ -433,4 +511,10 @@ int main()
     for (i = 0; i < 10; i++) {
 
     if ( i += 4 == 5 && 3-1 != 2 ){ do 5 times{print("hello world")}}
+*/
+/* TODO
+
+* Comment line needing \n to be categorized as COMMENT_LINE (if not it is IDENTIFIER)
+* weird COMMENT_LINE output: )OMMENT_LINE(// something
+
 */
