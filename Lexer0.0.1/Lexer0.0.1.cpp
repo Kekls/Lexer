@@ -3,7 +3,6 @@
 #include <vector>
 #include <cctype>
 #include <unordered_map>
-#include <unordered_set>
 
 enum class STATE {
     DEFAULT,
@@ -13,6 +12,7 @@ enum class STATE {
 };
 
 enum class TOKEN_TYPE {
+    NONE,
     NUMBER,
     STRING,
     LPAREN,
@@ -55,7 +55,10 @@ enum class TOKEN_TYPE {
     WHILE,
     IF,
     ELSE,
-    VAR
+    VAR,
+    BITWISE_AND,
+    BITWISE_OR,
+    NEW_LINE
 };
 
 std::ostream& operator<<(std::ostream& os, STATE state) {
@@ -80,38 +83,6 @@ private:
     STATE state = STATE::DEFAULT;
 
     std::unordered_map<std::string, TOKEN_TYPE> KEYWORDS = {
-        {"+", TOKEN_TYPE::PLUS},
-        {"-", TOKEN_TYPE::MINUS},
-        {"*", TOKEN_TYPE::MULT},
-        {"/", TOKEN_TYPE::DIV},
-        {"(", TOKEN_TYPE::LPAREN},
-        {")", TOKEN_TYPE::RPAREN},
-        {"%", TOKEN_TYPE::MOD},
-        {",", TOKEN_TYPE::COMMA},
-        {"=", TOKEN_TYPE::ASSIGN},
-        {":", TOKEN_TYPE::COLON},
-        { ";", TOKEN_TYPE::SEMICOLON},
-        { "{", TOKEN_TYPE::LBRACE},
-        { "}", TOKEN_TYPE::RBRACE},
-        { "[", TOKEN_TYPE::LBRACK},
-        { "]", TOKEN_TYPE::RBRACK},
-        { "<", TOKEN_TYPE::LT},
-        { ">", TOKEN_TYPE::GT},
-        { ".", TOKEN_TYPE::DOT},
-        { "!", TOKEN_TYPE::NOT},
-        { "+=", TOKEN_TYPE::PLUS_ASSIGN},
-        { "-=", TOKEN_TYPE::MINUS_ASSIGN},
-        { "*=", TOKEN_TYPE::MULT_ASSIGN},
-        { "/=", TOKEN_TYPE::DIV_ASSIGN},
-        { "%=", TOKEN_TYPE::MOD_ASSIGN},
-        { "==", TOKEN_TYPE::EQUAL},
-        { "!=", TOKEN_TYPE::NOT_EQUAL},
-        { "<=", TOKEN_TYPE::LT_EQUAL},
-        { ">=", TOKEN_TYPE::GT_EQUAL},
-        { "&&", TOKEN_TYPE::AND},
-        { "||", TOKEN_TYPE::OR},
-        { "++", TOKEN_TYPE::INC},
-        { "--", TOKEN_TYPE::DEC},
         { "do", TOKEN_TYPE::DO},
         { "times", TOKEN_TYPE::TIMES},
         { "while", TOKEN_TYPE::WHILE},
@@ -119,8 +90,6 @@ private:
         { "else", TOKEN_TYPE::ELSE},
         { "var", TOKEN_TYPE::VAR}
     };
-
-    std::unordered_set<std::string> stringCut = { "+", "-", "*", "/", "(", ")", "%", ",", ".", "=", ":", ";", "{", "}", "[", "]", "<", ">", ".", "!", "+=", "-=", "*=", "/=", "%=", "==", "!=", "<=", ">=", "&&", "||", "++", "--" };
 
 public:
     LEXER(std::string s) {
@@ -136,24 +105,26 @@ public:
     }
 
     void start() {
-        char stringSep = '\0';
-        std::string buffer;
-        std::string peek = "\0";
+        char stringSep = {};
+        std::string buffer = {};
+
+        char peek = {};
 
         for (int i = 0; i < s.length(); i++) {
-            if (i + 1 < s.length())
-                peek = std::string(1, s[i]) + std::string(1, s[i + 1]);
+            if (i + 1 < s.length()) {
+                peek = s[i + 1];
+            }
 
             if (state == STATE::COMMENT_BLOCK || state == STATE::COMMENT_LINE) {
 
-                commentState(buffer, peek, i);
+                commentState(buffer, peek, i, stringSep);
             }
             else if (state == STATE::STRING) {
 
-                stringState(buffer, peek, i, stringSep);
+                stringState(buffer, i, stringSep);
             }
             else if (state == STATE::DEFAULT) {
-                
+
                 defaultState(buffer, peek, i, stringSep);
             }
             else {
@@ -162,27 +133,37 @@ public:
 
             if (i + 1 == s.length()) {
                 stateChange(STATE::DEFAULT);
-                if (!buffer.empty()) tokenization(buffer);
-                buffer.clear();
-                stringSep = '\0';
+                tokenize(buffer);
+                stringSep = {};
             }
         }
     }
 
-    void commentState(std::string &buffer, std::string &peek, int &i) {
+    void commentState(std::string& buffer, char peek, int& i, char& stringSep) {
 
-        if (state == STATE::COMMENT_LINE && s[i] == '\\' && s[i + 1] == 'n') {
-            tokenization(buffer);
+        if (state == STATE::COMMENT_LINE && s[i] == '\\' && peek == 'n') {
+            TOKEN token = {};
+            token.type = TOKEN_TYPE::COMMENT_LINE;
+            token.value = buffer;
+            lexemification(token);
+
             buffer.clear();
+
+            token = {};
             stateChange(STATE::DEFAULT);
-            buffer += peek;
-            tokenization(buffer);
-            buffer.clear();
+            token.type = TOKEN_TYPE::NEW_LINE;
+            lexemification(token);
+
             i++;
         }
-        else if (state == STATE::COMMENT_BLOCK && s[i] == '*' && s[i + 1] == '/') {
-            buffer += peek;
-            tokenization(buffer);
+        else if (state == STATE::COMMENT_BLOCK && s[i] == '*' && peek == '/') {
+            TOKEN token = {};
+
+            buffer += std::string(1, s[i]) + std::string(1, peek);
+            token.type = TOKEN_TYPE::COMMENT_LINE;
+            token.value = buffer;
+            lexemification(token);
+
             stateChange(STATE::DEFAULT);
             buffer.clear();
             i++;
@@ -192,63 +173,125 @@ public:
         }
     }
 
-    void stringState(std::string& buffer, std::string& peek, int& i, char &stringSep) {
+    void stringState(std::string& buffer, int& i, char& stringSep) {
 
         if (s[i] == stringSep) {
-            stateChange(STATE::DEFAULT);
+            TOKEN token = {};
+
             buffer += std::string(1, s[i]);
-            tokenization(buffer);
+            token.type = TOKEN_TYPE::STRING;
+            token.value = buffer;
+
             buffer.clear();
-            stringSep = '\0';
+            stringSep = {};
+
+            stateChange(STATE::DEFAULT);
+            lexemification(token);
         }
         else {
             buffer += std::string(1, s[i]);
         }
     }
 
-    void defaultState(std::string& buffer, std::string& peek, int& i, char& stringSep) {
+    void defaultState(std::string& buffer, char peek, int& i, char& stringSep) {
 
-        if (s[i] == '/' && s[i + 1] == '*') {
-            buffer = peek;
-            stateChange(STATE::COMMENT_BLOCK);
-            i++;
+        TOKEN token = {};
+
+        if (isspace(s[i])) {
+            tokenize(buffer);
+            return;
         }
-        else if (s[i] == '/' && s[i + 1] == '/') {
-            buffer = peek;
-            stateChange(STATE::COMMENT_LINE);
-            i++;
-        }
-        else if (stringCut.contains(peek)) {
-            if (!buffer.empty()) tokenization(buffer);
-            buffer.clear();
-            buffer = peek;
-            tokenization(buffer);
-            buffer.clear();
-            i++;
-        }
-        else if (stringCut.contains(std::string(1, s[i]))) {
-            if (!buffer.empty()) tokenization(buffer);
-            buffer.clear();
+
+
+        switch (s[i]) {
+
+        case '/':
+            if (peek == '*') { stateChange(STATE::COMMENT_BLOCK); i++; buffer = std::string(1, s[i - 1]) + std::string(1, s[i]); }
+            else if (peek == '/') { stateChange(STATE::COMMENT_LINE); i++; buffer = std::string(1, s[i - 1]) + std::string(1, s[i]); }
+            else if (peek == '=') { token.type = TOKEN_TYPE::DIV_ASSIGN; }
+            else { token.type = TOKEN_TYPE::DIV; }
+            break;
+        case '\"':
+        case '\'':
             buffer += std::string(1, s[i]);
-            tokenization(buffer);
-            buffer.clear();
+            stateChange(STATE::STRING);
+            stringSep = s[i];
+            break;
+        case '+':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::PLUS_ASSIGN; }
+            else if (peek == '+') { i++; token.type = TOKEN_TYPE::INC; }
+            else { token.type = TOKEN_TYPE::PLUS; }
+            break;
+        case '-':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::MINUS_ASSIGN; }
+            else if (peek == '-') { i++; token.type = TOKEN_TYPE::DEC; }
+            else { token.type = TOKEN_TYPE::MINUS; }
+            break;
+        case '*':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::MULT_ASSIGN; }
+            else { token.type = TOKEN_TYPE::MULT; }
+            break;
+        case '%':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::MOD_ASSIGN; }
+            else { token.type = TOKEN_TYPE::MOD; }
+            break;
+        case '=':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::EQUAL; }
+            else { token.type = TOKEN_TYPE::ASSIGN; }
+            break;
+        case '<':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::LT_EQUAL; }
+            else { token.type = TOKEN_TYPE::LT; }
+            break;
+        case '>':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::GT_EQUAL; }
+            else { token.type = TOKEN_TYPE::GT; }
+            break;
+        case '!':
+            if (peek == '=') { i++; token.type = TOKEN_TYPE::NOT_EQUAL; }
+            else { token.type = TOKEN_TYPE::NOT; }
+            break;
+        case '&':
+            if (peek == '&') { i++; token.type = TOKEN_TYPE::AND; }
+            else { token.type = TOKEN_TYPE::BITWISE_AND; }
+            break;
+        case '|':
+            if (peek == '&') { i++; token.type = TOKEN_TYPE::OR; }
+            else { token.type = TOKEN_TYPE::BITWISE_OR; }
+            break;
+        case '(':
+            token.type = TOKEN_TYPE::LPAREN; break;
+        case ')':
+            token.type = TOKEN_TYPE::RPAREN; break;
+        case '[':
+            token.type = TOKEN_TYPE::LBRACK; break;
+        case ']':
+            token.type = TOKEN_TYPE::RBRACK; break;
+        case '{':
+            token.type = TOKEN_TYPE::LBRACE; break;
+        case '}':
+            token.type = TOKEN_TYPE::RBRACE; break;
+        case '.':
+            token.type = TOKEN_TYPE::DOT; break;
+        case ',':
+            token.type = TOKEN_TYPE::COMMA; break;
+        case ':':
+            token.type = TOKEN_TYPE::COLON; break;
+        case ';':
+            token.type = TOKEN_TYPE::SEMICOLON; break;
+        case '\\':
+            if (peek == 'n') { i++; token.type = TOKEN_TYPE::NEW_LINE; }
+            break;
+        default:
+            buffer += std::string(1, s[i]);
         }
-        else {
-            if (s[i] == '\'' || s[i] == '\"') {
-                buffer += std::string(1, s[i]);
-                stateChange(STATE::STRING);
-                stringSep = s[i];
-            }
-            else if (isspace(s[i])) {
 
-                if (buffer.empty()) return;
 
-                tokenization(buffer);
-                buffer.clear();
-            }
-            else {
-                buffer += std::string(1, s[i]);
-            }
+        if (token.type != TOKEN_TYPE::NONE) {
+            tokenize(buffer);
+
+            lexemification(token);
+            return;
         }
     }
 
@@ -274,33 +317,24 @@ public:
         }
     }
 
-    void tokenization(std::string t) {
-        TOKEN token;
+    void tokenize(std::string& buffer) {
+        TOKEN token = {};
 
-        if (KEYWORDS.count(t) > 0) {
-            token.type = KEYWORDS[t];
+        if (buffer.empty()) return;
+
+        if (KEYWORDS.count(buffer) > 0) {
+            token.type = KEYWORDS[buffer];
         }
-        else if (isdigit(t[0])) {
+        else if (isdigit(buffer[0])) {
             token.type = TOKEN_TYPE::NUMBER;
-            token.value = t;
-        }
-        else if (t[0] == '\'' || t[0] == '\"') {
-            token.type = TOKEN_TYPE::STRING;
-            token.value = t;
-        }
-        else if (t[0] == '/' && t[1] == '/') {
-            token.type = TOKEN_TYPE::COMMENT_LINE;
-            token.value = t;
-        }
-        else if (t[0] == '/' && t[1] == '*') {
-            token.type = TOKEN_TYPE::COMMENT_BLOCK;
-            token.value = t;
+            token.value = buffer;
         }
         else {
             token.type = TOKEN_TYPE::IDENTIFIER;
-            token.value = t;
+            token.value = buffer;
         }
 
+        buffer.clear();
         lexemification(token);
     }
 
@@ -318,6 +352,7 @@ public:
 
     std::string tokenToString(TOKEN_TYPE t) {
         switch (t) {
+        case TOKEN_TYPE::NONE: return "NONE";
         case TOKEN_TYPE::NUMBER: return "NUMBER";
         case TOKEN_TYPE::STRING: return "STRING";
         case TOKEN_TYPE::LPAREN: return "LPAREN";
@@ -361,6 +396,9 @@ public:
         case TOKEN_TYPE::IF: return "IF";
         case TOKEN_TYPE::ELSE: return "ELSE";
         case TOKEN_TYPE::VAR: return "VAR";
+        case TOKEN_TYPE::BITWISE_AND: return "BITWISE_AND";
+        case TOKEN_TYPE::BITWISE_OR: return "BITWISE_OR";
+        case TOKEN_TYPE::NEW_LINE: return "NEW_LINE";
         default: return "UNKNOWN";
         }
     }
