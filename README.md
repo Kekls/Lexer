@@ -1,6 +1,6 @@
 # Lexer0.0.1
 
-## ---NOTE---:
+## ---NOTE---
 
 This repository will be no longer updated, I moved all my work onto this new one https://github.com/Kekls/Klex
 
