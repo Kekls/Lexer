@@ -1,5 +1,9 @@
 # Lexer0.0.1
 
+##NOTE:
+
+This repository will be no longer updated, I moved all my work onto this new one https://github.com/Kekls/Klex
+
 ## About
 
 Lexer0.0.1 is my first attempt at building a lexical analyzer from scratch.
